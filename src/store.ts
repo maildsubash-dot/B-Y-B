@@ -19,13 +19,42 @@ export type Session = { id: string; date: string; title: string; seconds: number
 export type PlanExercise = { id: string; sets: number; reps: string; rest: number };
 export type PlanDay = { title: string; focus: string; exercises: PlanExercise[] };
 export type Plan = { choice: string; split: string; minutes: number; weekdays: string[]; days: PlanDay[]; why: string[]; seed: number };
+
+// Old built-in food list format (still used by the coach until Part 4)
 export type Food = {
   name: string; serving: string; kcal: number; protein: number; carbs: number; fat: number; fibre: number;
   diet: "vegan" | "veg" | "egg" | "nonveg"; meals: string; region: string; jain: boolean; cost: number; allergens: string[];
 };
+
+// Food database item. All nutrient values are per 100 g.
+export type FoodItem = {
+  id: string;
+  n: string; // name
+  g: string; // category
+  rg: string; // rough region from the import script
+  k: number; // kcal
+  p: number; // protein g
+  c: number; // carbs g
+  f: number; // fat g
+  fb: number; // fibre g
+  s: number; // sugar g
+  na: number; // sodium mg
+  pt: [string, number][]; // portions: [label, grams]
+  al: string[]; // other names (Hindi, local)
+  d: "vegan" | "veg" | "egg" | "nonveg";
+  j: boolean;
+  a: string[]; // allergens
+  src: string; // ONE, USDA, OFF, Mine, Recipe
+  st?: string; // Indian state
+  zn?: string; // region: South, North, East, West, North-East, Central, All-India, World
+  ing?: { id: string; n: string; grams: number }[]; // recipe ingredients
+};
+
 export type FoodEntry = {
   id: string; date: string; meal: string; name: string; qty: number;
   kcal: number; protein: number; carbs: number; fat: number; fibre: number;
+  fid?: string; // which food it came from
+  grams?: number;
 };
 export type DayLog = { water: number; sleep?: number; steps?: number; feel?: string; habits: string[] };
 export type WeightEntry = { date: string; kg: number };
@@ -34,7 +63,7 @@ export type ChatMsg = { role: "user" | "coach"; text: string };
 export type Routine = { name: string; plan: Plan };
 
 export type AppData = {
-  plan: Plan | null; sessions: Session[]; food: FoodEntry[]; customFoods: Food[];
+  plan: Plan | null; sessions: Session[]; food: FoodEntry[]; customFoods: Food[]; myFoods: FoodItem[];
   days: Record<string, DayLog>; weights: WeightEntry[]; measures: MeasureEntry[];
   favourites: string[]; routines: Routine[]; chat: ChatMsg[];
 };
@@ -49,7 +78,7 @@ export const DRAFT_KEY = "byb-draft-v2";
 const DATA_KEY = "byb-data-v1";
 
 export const EMPTY_DATA: AppData = {
-  plan: null, sessions: [], food: [], customFoods: [], days: {}, weights: [], measures: [],
+  plan: null, sessions: [], food: [], customFoods: [], myFoods: [], days: {}, weights: [], measures: [],
   favourites: [], routines: [], chat: [],
 };
 

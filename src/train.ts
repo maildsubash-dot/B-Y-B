@@ -1,6 +1,7 @@
 import type { AppData, Plan, PlanDay, PlanExercise, Profile, Session } from "./store";
 import { WEEK_MON, addDays, dateKey, weekdayOf } from "./store";
 import { ALL_EQUIP, EXERCISES, byId, type Equip, type Exercise, type Pattern } from "./exercises";
+import { isImported, regionOf } from "./exdb";
 
 /* ==========================================================
    BYB training engine: plan generator, swaps, records and the
@@ -44,6 +45,8 @@ const MAX_SETS = [12, 16, 20, 24, 26]; // most sets per session, by level
 const CARDIO_GOALS = ["Lose weight", "Reduce body fat", "Improve endurance", "Improve cardiovascular fitness", "Improve general health"];
 const LOWER: Pattern[] = ["squat", "hinge", "lunge", "glute", "calves", "quadIso", "hamIso"];
 const UPPER_BW: Pattern[] = ["hpush", "vpush", "triceps", "vpull"];
+// Muscles where BYB spreads exercises across different heads / regions
+const HEAD_MUSCLES = ["Biceps", "Triceps", "Shoulders", "Chest", "Back", "Abs and core", "Glutes", "Calves"];
 
 /* ---------- Equipment and safety ---------- */
 const EQUIP_MAP: Record<string, Equip[]> = {
@@ -113,7 +116,7 @@ const SH_ARMS = tpl("Shoulders and arms", "Shoulders, biceps and triceps", ["vpu
 const D_CHEST = tpl("Chest", "Chest", ["hpush", "hpush", "chestIso", "hpush", "chestIso", "core"]);
 const D_BACK = tpl("Back", "Back", ["vpull", "hpull", "hpull", "vpull", "rearDelt", "hinge"]);
 const D_SHOULDERS = tpl("Shoulders", "Shoulders", ["vpush", "shoulderIso", "rearDelt", "vpush", "shoulderIso", "core"]);
-const D_ARMS = tpl("Arms", "Biceps, triceps and forearms", ["biceps", "triceps", "biceps", "triceps", "forearm", "biceps"]);
+const D_ARMS = tpl("Arms", "Biceps, triceps and forearms", ["biceps", "triceps", "biceps", "triceps", "biceps", "triceps", "forearm"]);
 const D_CORE = tpl("Core", "Abs and core", ["core", "core", "glute", "core", "core"]);
 const D_CARDIO = tpl("Cardio", "Heart and lungs", ["cardio", "cardio", "core", "cardio"]);
 
@@ -138,17 +141,19 @@ function uniqueTitles(days: PlanDay[]) {
 /* ---------- Building workouts ---------- */
 type Ctx = {
   p: Profile; rank: number; medical: boolean; equip: Set<Equip>; focus: string; minutes: number;
-  maxLevel: number; salt: number; usedPlan: Set<string>; cardio: boolean; weakUpper: boolean; weakCardio: boolean;
+  maxLevel: number; salt: number; usedPlan: Set<string>; usedRegions: Set<string>; cardio: boolean; weakUpper: boolean; weakCardio: boolean;
 };
 
 function makeCtx(p: Profile, focusChoice: string, minutes: number, seed: number): Ctx {
   return {
     p, rank: rankOf(p.level), medical: hasHealthFlag(p), equip: availableEquip(p, focusChoice),
     focus: resolveFocus(p, focusChoice), minutes, maxLevel: maxLevelFor(p), salt: Math.floor(seed / 1000),
-    usedPlan: new Set(), cardio: p.goals.some((g) => CARDIO_GOALS.includes(g)),
+    usedPlan: new Set(), usedRegions: new Set(), cardio: p.goals.some((g) => CARDIO_GOALS.includes(g)),
     weakUpper: p.pushups === "0" || p.pushups === "1–5", weakCardio: p.cardio === "Under 10 min",
   };
 }
+
+const regionKey = (ex: Exercise) => `${ex.muscle}:${regionOf(ex)}`;
 
 function scheme(ctx: Ctx, ex: Exercise): { reps: string; rest: number } {
   if (ex.unit === "min") return { reps: ctx.focus === "Endurance" || ctx.focus === "Fat loss" ? "10–15" : "8–10", rest: 0 };
@@ -183,10 +188,11 @@ function exerciseCount(ctx: Ctx) {
   return Math.max(2, Math.min(ctx.rank <= 1 ? 6 : 8, c));
 }
 
-function pick(pattern: Pattern, ctx: Ctx, usedDay: Set<string>, n: number): Exercise | null {
+// Suggested plans use BYB's own exercises (with safety tags), spread across muscle heads.
+function pick(pattern: Pattern, ctx: Ctx, usedDay: Set<string>, dayRegions: Set<string>, n: number): Exercise | null {
   const options = EXERCISES.filter(
     (ex) =>
-      ex.pattern === pattern && !usedDay.has(ex.id) && ex.level <= ctx.maxLevel && canDo(ex, ctx.equip) && isSafeFor(ex, ctx.p) &&
+      !isImported(ex) && ex.pattern === pattern && !usedDay.has(ex.id) && ex.level <= ctx.maxLevel && canDo(ex, ctx.equip) && isSafeFor(ex, ctx.p) &&
       !(ctx.weakUpper && ex.equipment.length === 0 && ex.level > 1 && UPPER_BW.includes(ex.pattern)) &&
       !(ctx.weakCardio && ex.pattern === "cardio" && ex.level > 1),
   );
@@ -195,6 +201,11 @@ function pick(pattern: Pattern, ctx: Ctx, usedDay: Set<string>, n: number): Exer
     let s = ctx.rank === 0 ? (ex.level === 1 ? 3 : 0) : ex.level === ctx.maxLevel ? 2 : ex.level === ctx.maxLevel - 1 ? 1 : 0;
     if (ex.equipment.length > 0 && ctx.focus !== "Endurance") s += 1;
     if (ctx.usedPlan.has(ex.id)) s -= 2;
+    if (HEAD_MUSCLES.includes(ex.muscle)) {
+      const key = regionKey(ex);
+      if (!dayRegions.has(key)) s += 2;
+      if (!ctx.usedRegions.has(key)) s += 1;
+    }
     return s;
   };
   const ranked = [...options].sort((a, b) => score(b) - score(a) || a.id.localeCompare(b.id));
@@ -222,20 +233,23 @@ function capVolume(list: PlanExercise[], ctx: Ctx) {
 function buildDay(t: Template, ctx: Ctx, dayNo: number): PlanDay {
   const count = exerciseCount(ctx);
   const used = new Set<string>();
+  const dayRegions = new Set<string>();
   const list: PlanExercise[] = [];
   const add = (ex: Exercise) => {
     used.add(ex.id);
     ctx.usedPlan.add(ex.id);
+    dayRegions.add(regionKey(ex));
+    ctx.usedRegions.add(regionKey(ex));
     const sc = scheme(ctx, ex);
     list.push({ id: ex.id, sets: setsFor(ctx, ex), reps: sc.reps, rest: sc.rest });
   };
   t.slots.forEach((pattern, i) => {
     if (list.length >= count) return;
-    const ex = pick(pattern, ctx, used, dayNo * 7 + i * 3);
+    const ex = pick(pattern, ctx, used, dayRegions, dayNo * 7 + i * 3);
     if (ex) add(ex);
   });
   if (ctx.cardio && !t.slots.includes("cardio")) {
-    const c = pick("cardio", ctx, used, dayNo);
+    const c = pick("cardio", ctx, used, dayRegions, dayNo);
     if (c) {
       if (list.length >= count && list.length > 2) list.pop();
       add(c);
@@ -280,6 +294,7 @@ export function generatePlan(p: Profile, splitChoice = "Auto", focusChoice = "Au
   why.unshift(SPLIT_WHY[split]);
   why.push(FOCUS_WHY[ctx.focus] ?? FOCUS_WHY.General);
   why.push(`Training days: ${weekdays.join(", ")}. Each workout takes about ${minutes} minutes including warm-up and cool-down.`);
+  why.push("Exercises are spread across muscle heads (for example the long and short heads of the biceps, and front, side and rear shoulders) so every part is trained.");
   if (p.days.length > n) why.push(`You picked ${p.days.length} days. We planned ${n} so you can recover; use the other days for walking or stretching.`);
   if (split === "Bro split" && ctx.rank <= 1) why.push("Tip: full body or upper / lower usually works better for beginners because each muscle is trained more often.");
   if (ctx.rank === 0) why.push("Exercises start simple, so you can learn good technique with light loads.");
@@ -314,13 +329,20 @@ export function quickWorkout(p: Profile, target: string, minutes: number, bodywe
 }
 
 /* ---------- Swaps, warm-ups and timing ---------- */
+// Alternatives: same movement, same muscle head first, BYB's own exercises before imported ones.
 export function alternatives(id: string, p: Profile, focusChoice = "Auto"): Exercise[] {
   const ex = byId(id);
   if (!ex) return [];
   const equip = availableEquip(p, focusChoice);
-  return EXERCISES.filter((o) => o.id !== id && o.pattern === ex.pattern && canDo(o, equip) && isSafeFor(o, p)).sort(
-    (a, b) => a.level - b.level,
-  );
+  const region = regionOf(ex);
+  return EXERCISES.filter((o) => o.id !== id && o.pattern === ex.pattern && canDo(o, equip) && isSafeFor(o, p))
+    .sort(
+      (a, b) =>
+        Number(regionOf(b) === region) - Number(regionOf(a) === region) ||
+        Number(isImported(a)) - Number(isImported(b)) ||
+        a.level - b.level,
+    )
+    .slice(0, 40);
 }
 
 export function swapIn(old: PlanExercise, newId: string, p: Profile, focusChoice = "Auto"): PlanExercise {
@@ -331,6 +353,15 @@ export function swapIn(old: PlanExercise, newId: string, p: Profile, focusChoice
   const oldUnit = byId(old.id)?.unit;
   const sets = ex.unit === "min" ? 1 : oldUnit === "min" ? setsFor(ctx, ex) : old.sets;
   return { id: newId, sets, reps: sc.reps, rest: sc.rest };
+}
+
+// Sensible sets, reps and rest for any exercise the person adds themselves
+export function prescribe(id: string, p: Profile, focusChoice = "Auto"): PlanExercise | null {
+  const ex = byId(id);
+  if (!ex) return null;
+  const ctx = makeCtx(p, focusChoice, 45, Date.now());
+  const sc = scheme(ctx, ex);
+  return { id, sets: setsFor(ctx, ex), reps: sc.reps, rest: sc.rest };
 }
 
 export const topOf = (reps: string) => {

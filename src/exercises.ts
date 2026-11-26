@@ -496,8 +496,18 @@ export const EXERCISES: Exercise[] = [
     "Keep your back straight throughout.", { unit: "min", avoid: [LOWBACK] }),
 ];
 
-const MAP: Record<string, Exercise> = Object.fromEntries(EXERCISES.map((e) => [e.id, e]));
-export const byId = (id: string): Exercise | undefined => MAP[id];
+const MAP = new Map<string, Exercise>(EXERCISES.map((e) => [e.id, e]));
+export const byId = (id: string): Exercise | undefined => MAP.get(id);
+
+// Adds more exercises (BYB extras and the full Free Exercise DB) at startup
+export function registerExercises(list: Exercise[]) {
+  for (const ex of list) {
+    if (!MAP.has(ex.id)) {
+      MAP.set(ex.id, ex);
+      EXERCISES.push(ex);
+    }
+  }
+}
 
 export function kindOf(ex: Exercise): string {
   if (ex.type === "Cardio") return "Cardio";

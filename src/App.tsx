@@ -10,6 +10,7 @@ import Me from "./Me";
 import type { PlanDay, Profile, Tab } from "./store";
 import { DRAFT_KEY, EMPTY_DATA, PROFILE_KEY, clearAll, loadProfile, remove, useAppData, write } from "./store";
 import { generatePlan, planChoices } from "./train";
+import { useExerciseDb } from "./exdb";
 
 /* ==========================================================
    BuildYourBody app shell: onboarding, pages and menu.
@@ -33,6 +34,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("home");
   const [live, setLive] = useState<PlanDay | null>(null);
   const [editing, setEditing] = useState<Profile | null>(null);
+  const exercisesState = useExerciseDb();
 
   // Make sure there is always a plan once onboarding is done.
   useEffect(() => {
@@ -93,6 +95,16 @@ export default function App() {
     setProfile(p);
   };
 
+  /* Short loading screen while the exercise library loads */
+  if (exercisesState === "loading") {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-[#0d0d0d] text-white">
+        <span className="text-5xl font-black tracking-tight text-neon">BYB</span>
+        <span className="text-xs uppercase tracking-widest text-white/50">Loading exercises…</span>
+      </div>
+    );
+  }
+
   /* Onboarding (first time, or editing answers) */
   if (!profile) {
     return (
@@ -149,7 +161,7 @@ export default function App() {
       <main className="mx-auto max-w-md px-4 pb-28">
         {tab === "home" && <Home {...props} start={setLive} />}
         {tab === "train" && <TrainPage {...props} start={setLive} />}
-        {tab === "library" && <Library {...props} />}
+        {tab === "library" && <Library {...props} start={setLive} />}
         {tab === "food" && <FoodPage {...props} />}
         {tab === "coach" && <Coach {...props} start={setLive} />}
         {tab === "progress" && <Progress {...props} />}
