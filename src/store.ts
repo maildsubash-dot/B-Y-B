@@ -16,11 +16,11 @@ export type Profile = {
 export type SetLog = { reps: number; weight: number; done: boolean }; // weight always saved in kg
 export type ExerciseLog = { id: string; sets: SetLog[]; skipped: boolean };
 export type Session = { id: string; date: string; title: string; seconds: number; effort: string; exercises: ExerciseLog[] };
-export type PlanExercise = { id: string; sets: number; reps: string; rest: number };
+export type PlanExercise = { id: string; sets: number; reps: string; rest: number; kg?: number }; // kg: a weight you picked yourself
 export type PlanDay = { title: string; focus: string; exercises: PlanExercise[] };
 export type Plan = { choice: string; split: string; minutes: number; weekdays: string[]; days: PlanDay[]; why: string[]; seed: number };
 
-// Old built-in food list format (still used by the coach until Part 4)
+// Old built-in food list format (used by stats.ts)
 export type Food = {
   name: string; serving: string; kcal: number; protein: number; carbs: number; fat: number; fibre: number;
   diet: "vegan" | "veg" | "egg" | "nonveg"; meals: string; region: string; jain: boolean; cost: number; allergens: string[];
@@ -62,10 +62,19 @@ export type MeasureEntry = { date: string; waist?: number; chest?: number; hips?
 export type ChatMsg = { role: "user" | "coach"; text: string };
 export type Routine = { name: string; plan: Plan };
 
+// The weights you own at home (all in kg). At a gym, BYB assumes a full range.
+export type Gear = {
+  set: boolean;
+  dumbbells: number[]; // fixed pairs, for example [2.5, 5, 7.5]
+  adjustable: { min: number; max: number; step: number } | null;
+  kettlebells: number[];
+};
+export const EMPTY_GEAR: Gear = { set: false, dumbbells: [], adjustable: null, kettlebells: [] };
+
 export type AppData = {
   plan: Plan | null; sessions: Session[]; food: FoodEntry[]; customFoods: Food[]; myFoods: FoodItem[];
   days: Record<string, DayLog>; weights: WeightEntry[]; measures: MeasureEntry[];
-  favourites: string[]; routines: Routine[]; chat: ChatMsg[];
+  favourites: string[]; routines: Routine[]; chat: ChatMsg[]; gear: Gear;
 };
 
 export type Tab = "home" | "train" | "library" | "food" | "coach" | "progress" | "me";
@@ -76,13 +85,15 @@ export type PageProps = { profile: Profile; data: AppData; setData: SetData; go:
 export const PROFILE_KEY = "byb-profile-v2";
 export const DRAFT_KEY = "byb-draft-v2";
 const DATA_KEY = "byb-data-v1";
+export const LIVE_KEY = "byb-live-v1"; // a workout in progress
+export const SMART_KEY = "byb-smart-v1";
 
 export const EMPTY_DATA: AppData = {
   plan: null, sessions: [], food: [], customFoods: [], myFoods: [], days: {}, weights: [], measures: [],
-  favourites: [], routines: [], chat: [],
+  favourites: [], routines: [], chat: [], gear: EMPTY_GEAR,
 };
 
-function read<T>(key: string): T | null {
+export function read<T>(key: string): T | null {
   try {
     const raw = localStorage.getItem(key);
     return raw ? (JSON.parse(raw) as T) : null;
@@ -105,10 +116,13 @@ export function remove(key: string) {
   }
 }
 export const loadProfile = () => read<Profile>(PROFILE_KEY);
-export const clearAll = () => [PROFILE_KEY, DRAFT_KEY, DATA_KEY].forEach(remove);
+export const clearAll = () => [PROFILE_KEY, DRAFT_KEY, DATA_KEY, LIVE_KEY, SMART_KEY].forEach(remove);
 
 export function useAppData() {
-  const [data, setData] = useState<AppData>(() => ({ ...EMPTY_DATA, ...(read<Partial<AppData>>(DATA_KEY) ?? {}) }));
+  const [data, setData] = useState<AppData>(() => {
+    const saved = read<Partial<AppData>>(DATA_KEY) ?? {};
+    return { ...EMPTY_DATA, ...saved, gear: { ...EMPTY_GEAR, ...(saved.gear ?? {}) } };
+  });
   useEffect(() => write(DATA_KEY, data), [data]);
   return [data, setData] as const;
 }

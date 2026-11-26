@@ -1,6 +1,6 @@
 import type { AppData, Plan, PlanDay, PlanExercise, Profile, Session } from "./store";
 import { WEEK_MON, addDays, dateKey, weekdayOf } from "./store";
-import { ALL_EQUIP, EXERCISES, byId, type Equip, type Exercise, type Pattern } from "./exercises";
+import { ALL_EQUIP, EXERCISES, byId, kindOf, type Equip, type Exercise, type Pattern } from "./exercises";
 import { isImported, regionOf } from "./exdb";
 
 /* ==========================================================
@@ -141,14 +141,15 @@ function uniqueTitles(days: PlanDay[]) {
 /* ---------- Building workouts ---------- */
 type Ctx = {
   p: Profile; rank: number; medical: boolean; equip: Set<Equip>; focus: string; minutes: number;
-  maxLevel: number; salt: number; usedPlan: Set<string>; usedRegions: Set<string>; cardio: boolean; weakUpper: boolean; weakCardio: boolean;
+  maxLevel: number; salt: number; usedPlan: Set<string>; usedRegions: Set<string>; usedKinds: Map<string, number>;
+  cardio: boolean; weakUpper: boolean; weakCardio: boolean;
 };
 
 function makeCtx(p: Profile, focusChoice: string, minutes: number, seed: number): Ctx {
   return {
     p, rank: rankOf(p.level), medical: hasHealthFlag(p), equip: availableEquip(p, focusChoice),
     focus: resolveFocus(p, focusChoice), minutes, maxLevel: maxLevelFor(p), salt: Math.floor(seed / 1000),
-    usedPlan: new Set(), usedRegions: new Set(), cardio: p.goals.some((g) => CARDIO_GOALS.includes(g)),
+    usedPlan: new Set(), usedRegions: new Set(), usedKinds: new Map(), cardio: p.goals.some((g) => CARDIO_GOALS.includes(g)),
     weakUpper: p.pushups === "0" || p.pushups === "1–5", weakCardio: p.cardio === "Under 10 min",
   };
 }
@@ -188,7 +189,8 @@ function exerciseCount(ctx: Ctx) {
   return Math.max(2, Math.min(ctx.rank <= 1 ? 6 : 8, c));
 }
 
-// Suggested plans use BYB's own exercises (with safety tags), spread across muscle heads.
+// Suggested plans use BYB's own exercises (with safety tags), spread across muscle heads
+// and across all the equipment you own.
 function pick(pattern: Pattern, ctx: Ctx, usedDay: Set<string>, dayRegions: Set<string>, n: number): Exercise | null {
   const options = EXERCISES.filter(
     (ex) =>
@@ -206,6 +208,10 @@ function pick(pattern: Pattern, ctx: Ctx, usedDay: Set<string>, dayRegions: Set<
       if (!dayRegions.has(key)) s += 2;
       if (!ctx.usedRegions.has(key)) s += 1;
     }
+    // Mix in all your equipment: types already used a lot score a little lower
+    s -= Math.min(1.5, (ctx.usedKinds.get(kindOf(ex)) ?? 0) * 0.25);
+    // Strength focus: barbell compound lifts first, when you have a barbell
+    if (ctx.focus === "Strength" && ex.type === "Compound" && ex.equipment.includes("barbell")) s += 1;
     return s;
   };
   const ranked = [...options].sort((a, b) => score(b) - score(a) || a.id.localeCompare(b.id));
@@ -240,6 +246,8 @@ function buildDay(t: Template, ctx: Ctx, dayNo: number): PlanDay {
     ctx.usedPlan.add(ex.id);
     dayRegions.add(regionKey(ex));
     ctx.usedRegions.add(regionKey(ex));
+    const kind = kindOf(ex);
+    ctx.usedKinds.set(kind, (ctx.usedKinds.get(kind) ?? 0) + 1);
     const sc = scheme(ctx, ex);
     list.push({ id: ex.id, sets: setsFor(ctx, ex), reps: sc.reps, rest: sc.rest });
   };
@@ -295,9 +303,10 @@ export function generatePlan(p: Profile, splitChoice = "Auto", focusChoice = "Au
   why.push(FOCUS_WHY[ctx.focus] ?? FOCUS_WHY.General);
   why.push(`Training days: ${weekdays.join(", ")}. Each workout takes about ${minutes} minutes including warm-up and cool-down.`);
   why.push("Exercises are spread across muscle heads (for example the long and short heads of the biceps, and front, side and rear shoulders) so every part is trained.");
+  if (ctx.equip.size > 1) why.push("Exercises are mixed across the different equipment you have, not just one type.");
   if (p.days.length > n) why.push(`You picked ${p.days.length} days. We planned ${n} so you can recover; use the other days for walking or stretching.`);
   if (split === "Bro split" && ctx.rank <= 1) why.push("Tip: full body or upper / lower usually works better for beginners because each muscle is trained more often.");
-  if (ctx.rank === 0) why.push("Exercises start simple, so you can learn good technique with light loads.");
+  if (ctx.rank === 0) why.push("Exercises start simple, so you can learn good technique with light loads. Barbell lifts are added once you move up a level.");
   if (ctx.weakUpper) why.push("Upper-body moves start with easier versions (like wall or knee push-ups), based on your fitness check.");
   if (ctx.medical) why.push("Because of your health answers, harder moves are left out and volume is lower. Please check with a doctor first.");
   if (p.painAreas.length) why.push(`Exercises that load your ${p.painAreas.join(", ").toLowerCase()} are left out.`);

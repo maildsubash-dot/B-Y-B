@@ -1,179 +1,184 @@
-import { useEffect, useState } from "react";
-import Onboarding from "./Onboarding";
-import Home from "./Home";
-import TrainPage, { LiveWorkout } from "./TrainPage";
-import Library from "./Library";
-import FoodPage from "./Food";
-import Coach from "./Coach";
-import Progress from "./Progress";
-import Me from "./Me";
-import type { PlanDay, Profile, Tab } from "./store";
-import { DRAFT_KEY, EMPTY_DATA, PROFILE_KEY, clearAll, loadProfile, remove, useAppData, write } from "./store";
-import { generatePlan, planChoices } from "./train";
+.counter {
+  font-size: 16px;
+  padding: 5px 10px;
+  border-radius: 5px;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 2px solid transparent;
+  transition: border-color 0.3s;
+  margin-bottom: 24px;
 
-/* ==========================================================
-   BuildYourBody app shell: onboarding, pages and menu.
-   ========================================================== */
+  &:hover {
+    border-color: var(--accent-border);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
 
-const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: "home", label: "Home", icon: "🏠" },
-  { id: "train", label: "Train", icon: "🏋️" },
-  { id: "food", label: "Food", icon: "🍛" },
-  { id: "coach", label: "Coach", icon: "💬" },
-  { id: "progress", label: "Progress", icon: "📊" },
-];
+.hero {
+  position: relative;
 
-// If any of these change when someone edits their answers, the plan is rebuilt.
-const PLAN_FIELDS: (keyof Profile)[] = ["goals", "level", "place", "equipment", "days", "minutes", "painAreas", "health", "pushups", "cardio", "age"];
-const planInputsChanged = (a: Profile, b: Profile) => PLAN_FIELDS.some((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
-
-export default function App() {
-  const [profile, setProfile] = useState<Profile | null>(loadProfile);
-  const [data, setData] = useAppData();
-  const [tab, setTab] = useState<Tab>("home");
-  const [live, setLive] = useState<PlanDay | null>(null);
-  const [editing, setEditing] = useState<Profile | null>(null);
-
-  // Make sure there is always a plan once onboarding is done.
-  useEffect(() => {
-    if (profile && !data.plan) setData((d) => (d.plan ? d : { ...d, plan: generatePlan(profile) }));
-  }, [profile, data.plan, setData]);
-
-  useEffect(() => {
-    window.scrollTo(0, 0);
-  }, [tab, live]);
-
-  const finishOnboarding = () => {
-    const p = loadProfile();
-    if (!p) return;
-    const before = editing;
-    setProfile(p);
-    setEditing(null);
-    setData((d) => {
-      if (!d.plan) return { ...d, plan: generatePlan(p) };
-      if (before && planInputsChanged(before, p)) {
-        const c = planChoices(d.plan);
-        const plan = generatePlan(p, c.split, c.focus);
-        plan.why.unshift("Your plan was rebuilt because your profile changed.");
-        return { ...d, plan };
-      }
-      return d;
-    });
-    setTab("home");
-  };
-
-  const editProfile = () => {
-    if (!profile) return;
-    write(DRAFT_KEY, { p: profile, step: 11 });
-    remove(PROFILE_KEY);
-    setEditing(profile);
-    setProfile(null);
-  };
-
-  const cancelEdit = () => {
-    if (!editing) return;
-    write(PROFILE_KEY, editing);
-    remove(DRAFT_KEY);
-    setProfile(editing);
-    setEditing(null);
-  };
-
-  const resetAll = () => {
-    clearAll();
-    remove("byb-live-v1");
-    setData(() => EMPTY_DATA);
-    setLive(null);
-    setEditing(null);
-    setTab("home");
-    setProfile(null);
-  };
-
-  const replaceProfile = (p: Profile) => {
-    write(PROFILE_KEY, p);
-    setProfile(p);
-  };
-
-  /* Onboarding (first time, or editing answers) */
-  if (!profile) {
-    return (
-      <>
-        {editing && (
-          <div className="sticky top-0 z-50 flex items-center justify-between border-b border-white/10 bg-[#0d0d0d] px-4 py-2 text-sm text-white">
-            <span className="text-white/60">Editing your answers</span>
-            <button type="button" className="font-semibold text-neon" onClick={cancelEdit}>
-              Cancel
-            </button>
-          </div>
-        )}
-        <Onboarding onDone={finishOnboarding} />
-      </>
-    );
+  .base,
+  .framework,
+  .vite {
+    inset-inline: 0;
+    margin: 0 auto;
   }
 
-  /* Live workout takes the whole screen */
-  if (live) {
-    return <LiveWorkout key={live.title} day={live} profile={profile} data={data} setData={setData} onExit={() => setLive(null)} />;
+  .base {
+    width: 170px;
+    position: relative;
+    z-index: 0;
   }
 
-  const props = { profile, data, setData, go: setTab };
+  .framework,
+  .vite {
+    position: absolute;
+  }
 
-  return (
-    <div className="min-h-screen bg-[#0d0d0d] text-white">
-      <header className="sticky top-0 z-30 border-b border-white/10 bg-[#0d0d0d]/95 backdrop-blur">
-        <div className="mx-auto flex max-w-md items-center justify-between px-4 py-3">
-          <button type="button" onClick={() => setTab("home")} className="flex items-baseline gap-2" aria-label="Go to home">
-            <span className="text-2xl font-black tracking-tight text-neon">BYB</span>
-            <span className="text-[10px] uppercase tracking-widest text-white/45">BuildYourBody</span>
-          </button>
-          <div className="flex gap-1">
-            {(
-              [
-                ["library", "📚", "Library"],
-                ["me", "👤", "Me"],
-              ] as [Tab, string, string][]
-            ).map(([id, icon, label]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setTab(id)}
-                aria-current={tab === id ? "page" : undefined}
-                className={`rounded-xl px-3 py-1.5 text-xs font-semibold ${tab === id ? "bg-neon text-black" : "text-white/70 hover:text-white"}`}
-              >
-                <span aria-hidden="true">{icon}</span> {label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </header>
+  .framework {
+    z-index: 1;
+    top: 34px;
+    height: 28px;
+    transform: perspective(2000px) rotateZ(300deg) rotateX(44deg) rotateY(39deg)
+      scale(1.4);
+  }
 
-      <main className="mx-auto max-w-md px-4 pb-28">
-        {tab === "home" && <Home {...props} start={setLive} />}
-        {tab === "train" && <TrainPage {...props} start={setLive} />}
-        {tab === "library" && <Library {...props} />}
-        {tab === "food" && <FoodPage {...props} />}
-        {tab === "coach" && <Coach {...props} start={setLive} />}
-        {tab === "progress" && <Progress {...props} />}
-        {tab === "me" && <Me {...props} editProfile={editProfile} resetAll={resetAll} replaceProfile={replaceProfile} />}
-      </main>
+  .vite {
+    z-index: 0;
+    top: 107px;
+    height: 26px;
+    width: auto;
+    transform: perspective(2000px) rotateZ(300deg) rotateX(40deg) rotateY(39deg)
+      scale(0.8);
+  }
+}
 
-      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-[#0d0d0d]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur" aria-label="Main menu">
-        <div className="mx-auto grid max-w-md grid-cols-5">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setTab(t.id)}
-              aria-current={tab === t.id ? "page" : undefined}
-              className={`flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold ${tab === t.id ? "text-neon" : "text-white/55"}`}
-            >
-              <span className="text-lg" aria-hidden="true">
-                {t.icon}
-              </span>
-              {t.label}
-            </button>
-          ))}
-        </div>
-      </nav>
-    </div>
-  );
+#center {
+  display: flex;
+  flex-direction: column;
+  gap: 25px;
+  place-content: center;
+  place-items: center;
+  flex-grow: 1;
+
+  @media (max-width: 1024px) {
+    padding: 32px 20px 24px;
+    gap: 18px;
+  }
+}
+
+#next-steps {
+  display: flex;
+  border-top: 1px solid var(--border);
+  text-align: left;
+
+  & > div {
+    flex: 1 1 0;
+    padding: 32px;
+    @media (max-width: 1024px) {
+      padding: 24px 20px;
+    }
+  }
+
+  .icon {
+    margin-bottom: 16px;
+    width: 22px;
+    height: 22px;
+  }
+
+  @media (max-width: 1024px) {
+    flex-direction: column;
+    text-align: center;
+  }
+}
+
+#docs {
+  border-right: 1px solid var(--border);
+
+  @media (max-width: 1024px) {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+#next-steps ul {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  gap: 8px;
+  margin: 32px 0 0;
+
+  .logo {
+    height: 18px;
+  }
+
+  a {
+    color: var(--text-h);
+    font-size: 16px;
+    border-radius: 6px;
+    background: var(--social-bg);
+    display: flex;
+    padding: 6px 12px;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+    transition: box-shadow 0.3s;
+
+    &:hover {
+      box-shadow: var(--shadow);
+    }
+    .button-icon {
+      height: 18px;
+      width: 18px;
+    }
+  }
+
+  @media (max-width: 1024px) {
+    margin-top: 20px;
+    flex-wrap: wrap;
+    justify-content: center;
+
+    li {
+      flex: 1 1 calc(50% - 8px);
+    }
+
+    a {
+      width: 100%;
+      justify-content: center;
+      box-sizing: border-box;
+    }
+  }
+}
+
+#spacer {
+  height: 88px;
+  border-top: 1px solid var(--border);
+  @media (max-width: 1024px) {
+    height: 48px;
+  }
+}
+
+.ticks {
+  position: relative;
+  width: 100%;
+
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    top: -4.5px;
+    border: 5px solid transparent;
+  }
+
+  &::before {
+    left: 0;
+    border-left-color: var(--border);
+  }
+  &::after {
+    right: 0;
+    border-right-color: var(--border);
+  }
 }
